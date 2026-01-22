@@ -1,60 +1,17 @@
 import { DependencyRegistry } from './DependencyRegistry';
+import { Getter, GetterCollection, GetterFunction, GetterRegistry } from './Getter';
+import { SYMBOL_BASE_OBJECT, SYMBOL_PROXY } from './symbols';
+import { isPositiveNumber, isReactiveObject } from './functions';
 
-type Listener<T> = (state: T) => void;
-
-// A getter is a function that computes a result out of the state
-type GetterFunction<T, R> = (state: T, getters: GetterCollection<T>) => R;
-type GetterCollection<T> = {
-    [key: string]: Getter<T, any>;
-};
-
-// Type for potentially reactive objects
-interface ReactiveObject extends Record<typeof SYMBOL_PROXY, boolean> {
-    [key: string]: any;
-}
-
-// Type guard to check if object is reactive
-function isReactiveObject<T extends object>(target: T): target is T & ReactiveObject {
-    return SYMBOL_PROXY in target;
-}
-
-class Getter<T, R> {
-    private _cache: any = undefined;
-    private _invalid: boolean = true;
-    private readonly _depreg = new DependencyRegistry();
-
-    constructor(private readonly fn: GetterFunction<T, R>) {}
-
-    get invalid() {
-        return this._invalid;
-    }
-
-    get depreg() {
-        return this._depreg;
-    }
-
-    get value(): R {
-        if (this._invalid) {
-            throw new Error('Getter not computed yet or invalid.');
-        }
-        return this._cache as R;
-    }
-
-    run(state: T, getters: GetterCollection<T>) {
-        if (this.invalid) {
-            this._cache = this.fn(state, getters);
-            this._invalid = false;
-        }
-        return this._cache;
-    }
-}
-
+/**
+ * Effect function are used in the dependency collecting mechanism
+ */
 type EffectFunction = () => void;
 
 class Effect {
     constructor(
         private readonly fn: EffectFunction,
-        private readonly depreg: DependencyRegistry
+        public readonly depreg: DependencyRegistry
     ) {}
 
     run() {
@@ -62,65 +19,246 @@ class Effect {
     }
 }
 
-// Where all data go
-type State<T> = T;
-
-export class ReactiveStore<T extends object, K extends string> {
+export class ReactiveStore<T extends object> {
     public readonly state: T;
-    private listeners: Set<Listener<T>> = new Set();
-    private readonly getters: GetterCollection<T> = {};
+    public getter: GetterRegistry = {};
+    private readonly getterCollection: GetterCollection<T> = {};
+    // When a getter is run, each time a state property is changed
+    // all running effect are iterated, and dependencies are updated
     private readonly runningEffects: Effect[] = [];
+    private readonly currentlyProxyfying = new WeakSet<object>();
 
     constructor(initialState: T) {
-        this.state = initialState;
+        this.state = this.proxifyObject(initialState);
     }
 
-    proxifyValue<X>(t: X): X {
-        if (typeof t === 'object' && t !== null) {
-            return this.proxifyObject(t);
+    getGetterData(getterName: string) {
+        if (getterName in this.getterCollection) {
+            return this.getterCollection[getterName];
         } else {
-            return t;
+            throw new ReferenceError(`getter ${getterName} not found`);
         }
     }
 
-    isReactive<X extends object>(target: X): boolean {
-        return !!target[SYMBOL_PROXY];
+    /**
+     * This function is usually called by Proxy handler to notify that a (target, property) has been modified
+     * This will cause all running effect to add (target, property) to their dependency registry
+     * @param target
+     * @param property
+     * @private
+     */
+    track<X extends object>(target: X, property: string | symbol): void {
+        if (
+            typeof property === 'string' &&
+            property !== 'length' &&
+            ((property in Object.prototype && !Array.isArray(target)) ||
+                (property in Array.prototype && Array.isArray(target)) ||
+                (typeof target[property as keyof X] === 'function' &&
+                    !Reflect.has(target, property)))
+        ) {
+            return;
+        }
+
+        // Ignore non existant properties
+        if (!Reflect.has(target, property)) {
+            return;
+        }
+        // Add the property to the dependency registry of all running effects
+        this.runningEffects.forEach((effect) => {
+            effect.depreg.add(target, property);
+        });
     }
 
     /**
-     * Turn an object into à reactive object
+     * When a property of a target is being changed, all dependant getters are to be invalidated.
+     */
+    trigger<X extends object>(target: X, property: string | symbol): void {
+        for (const getter of Object.values(this.getterCollection)) {
+            const depreg = getter.depreg;
+            let bInvalidate = false;
+            if (depreg.has(target, property)) {
+                bInvalidate = true;
+            }
+            if (bInvalidate) {
+                this.trigger(getter, 'value');
+                getter.invalidate();
+            }
+        }
+    }
+
+    handlerGet<X extends object>(target: X, property: string | symbol, receiver: any): any {
+        if (property === SYMBOL_PROXY) {
+            return true;
+        }
+        const result = Reflect.get(target, property, receiver);
+        this.track(target, property);
+        return result;
+    }
+
+    handlerSet<X extends object>(
+        target: X,
+        property: string | symbol,
+        value: any,
+        receiver: any
+    ): boolean {
+        let bNewProperty: boolean = false;
+        let result: boolean;
+        if (typeof value === 'object' && value !== null) {
+            bNewProperty = !(property in target);
+            result = Reflect.set(target, property, this.proxifyObject(value), receiver);
+        } else {
+            result = Reflect.set(target, property, value, receiver);
+        }
+        this.trigger(target, property);
+        if (bNewProperty) {
+            this.trigger(target, SYMBOL_BASE_OBJECT);
+        }
+        return result;
+    }
+
+    handlerHas<X extends object>(target: X, property: string | symbol): boolean {
+        const result = Reflect.has(target, property);
+        this.track(target, property);
+        return result;
+    }
+
+    handlerOwnKeys<X extends object>(target: X): ArrayLike<string | symbol> {
+        const result = Reflect.ownKeys(target);
+        this.track(target, SYMBOL_BASE_OBJECT);
+        return result;
+    }
+
+    handlerDeleteProperty<X extends object>(target: X, property: string | symbol): never {
+        throw new Error(
+            'Cannot delete key ' +
+                property.toString() +
+                '. Adding or deleting keys is forbidden in state. This is because getters cache is not invalidate by adding/removing properties'
+        );
+        // trigger(target, property)
+        // return Reflect.deleteProperty(target, property)
+    }
+
+    handlerArrayGet<X extends any[]>(target: X, property: string | symbol, receiver: any): any {
+        if (property === SYMBOL_PROXY) {
+            return true;
+        }
+        console.log('array get', property, 'in array prototype ?', property in Array.prototype);
+        if (typeof property === 'string' && property in Array.prototype) {
+            const method = Array.prototype[property as keyof typeof Array.prototype];
+            console.log('type of', property, typeof method);
+            if (typeof method === 'function') {
+                return (...args: any[]) => {
+                    const result = method.apply(target, args);
+                    console.log('apply', method, 'on', target);
+                    this.trigger(target, property);
+                    return result;
+                };
+            }
+        }
+        this.track(target, property);
+        return Reflect.get(target, property, receiver);
+    }
+
+    handlerArraySet<X extends any[]>(
+        target: X,
+        property: string | symbol,
+        value: any,
+        receiver: any
+    ): boolean {
+        // Si la propriété est un indice ou 'length', on proxifie la valeur
+        if (typeof property === 'string' && (property === 'length' || isPositiveNumber(property))) {
+            value = this.proxifyObject(value);
+        }
+
+        console.log(value);
+        // Met à jour la propriété
+        const nPrevLength = target.length;
+        const result = Reflect.set(target, property, value, receiver);
+        const nNewLength = target.length;
+        if (nNewLength !== nPrevLength) {
+            console.log('new length', nNewLength);
+            this.trigger(target, 'length');
+        }
+
+        // Déclenche les listeners
+        this.trigger(target, property);
+
+        return result;
+    }
+
+    handlerArrayHas<X extends any[]>(target: X, property: string | symbol): boolean {
+        const result = Reflect.has(target, property);
+        this.track(target, property);
+        return result;
+    }
+
+    handlerArrayOwnKeys<X extends any[]>(target: X): ArrayLike<string | symbol> {
+        const result = Reflect.ownKeys(target);
+        this.track(target, SYMBOL_BASE_OBJECT);
+        return result;
+    }
+
+    handlerArrayDeleteProperty<X extends any[]>(target: X, property: string | symbol): boolean {
+        const result = Reflect.deleteProperty(target, property);
+        const nPrevLength = target.length;
+        this.trigger(target, property);
+        const nNewLength = target.length;
+        if (nNewLength !== nPrevLength) {
+            this.trigger(target, 'length');
+        }
+        return result;
+    }
+
+    /**
+     * Turn a regular object into à reactive object unless it is already reactive
      * @param oTarget
      * @returns {Proxy}
      */
     proxifyObject<X extends object>(oTarget: X): X {
+        if (this.currentlyProxyfying.has(oTarget)) {
+            return oTarget;
+        }
         if (Object.isFrozen(oTarget) || Object.isSealed(oTarget) || isReactiveObject(oTarget)) {
             return oTarget;
         }
-        const bArray = Array.isArray(oTarget);
+        this.currentlyProxyfying.add(oTarget);
         Object.defineProperty(oTarget, SYMBOL_PROXY, {
             value: true,
             writable: false,
             configurable: false,
             enumerable: false,
         });
-        if (bArray) {
-            return new Proxy(oTarget.map((e) => this.proxifyValue(e)));
+        if (Array.isArray(oTarget)) {
+            for (let i = 0, l = oTarget.length; i < l; ++i) {
+                const value = oTarget[i];
+                if (typeof value === 'object' && value !== null) {
+                    oTarget[i] = this.proxifyObject(value);
+                }
+            }
+            this.currentlyProxyfying.delete(oTarget);
+            return new Proxy(oTarget, {
+                get: this.handlerArrayGet.bind(this),
+                set: this.handlerArraySet.bind(this),
+                has: this.handlerArrayHas.bind(this),
+                ownKeys: this.handlerArrayOwnKeys.bind(this),
+                deleteProperty: this.handlerArrayDeleteProperty.bind(this),
+            });
         } else {
-            const oClone = {};
             Reflect.ownKeys(oTarget).forEach((key) => {
-                if (typeof key === 'symbol') {
-                    if (key !== SYMBOL_PROXY) {
-                        oClone[key] = oTarget[key];
-                    }
-                } else {
-                    const t = oTarget[key];
-                    oClone[key] =
-                        t !== undefined && t !== null && typeof t === 'object'
-                            ? this.proxifyObject(t)
-                            : t;
+                const value = oTarget[key as keyof X];
+                if (typeof value === 'object' && value !== null) {
+                    // pure object
+                    oTarget[key as keyof X] = this.proxifyObject(value);
                 }
             });
-            return this.createProxy(oClone);
+            this.currentlyProxyfying.delete(oTarget);
+            return new Proxy(oTarget, {
+                get: this.handlerGet.bind(this),
+                set: this.handlerSet.bind(this),
+                has: this.handlerHas.bind(this),
+                ownKeys: this.handlerOwnKeys.bind(this),
+                deleteProperty: this.handlerDeleteProperty.bind(this),
+            });
         }
     }
 
@@ -142,15 +280,27 @@ export class ReactiveStore<T extends object, K extends string> {
         effect.run();
     }
 
+    defineGetter<R>(name: string, getter: GetterFunction<T, R>) {
+        this.getterCollection[name] = new Getter(getter);
+        Object.defineProperty(this.getter, name, {
+            get: (): R => {
+                // Appelle `runGetter` quand la propriété est accédée
+                return this.runGetter(name);
+            },
+            enumerable: true,
+            configurable: true,
+        });
+    }
+
     runGetter<Key extends keyof GetterCollection<T>>(
         name: Key
     ): ReturnType<GetterCollection<T>[Key]['run']> {
-        const getter = this.getters[name];
+        const getter = this.getterCollection[name];
         if (!getter) {
             throw new ReferenceError(`Getter ${name} not found`);
         }
         this.createEffect(() => {
-            getter.run(this.state, this.getters);
+            getter.run(this.state, this.getter);
         }, getter.depreg);
         return getter.value;
     }
