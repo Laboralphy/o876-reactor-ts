@@ -88,17 +88,113 @@ describe('State with array of objects', () => {
         expect(g1.depreg.keys().includes('length')).toBe(true);
     });
 
+    test('should update getter we length is modified', () => {
+        type StateType = { entities: number[] };
+        const oState: StateType = { entities: [] };
+        const r = new ReactiveStore(oState);
+        r.defineGetter('getCount', (state: StateType) => state.entities.length);
+        expect(r.getter.getCount).toBe(0);
+        r.state.entities[0] = 1;
+        expect(r.getter.getCount).toBe(1);
+        r.state.entities.splice(0, 1);
+        expect(r.state.entities.length).toBe(0);
+        expect(r.getter.getCount).toBe(0);
+    });
+
+    test('should update getter when using push to add an item', () => {
+        type StateType = { entities: number[] };
+        const oState: StateType = { entities: [] };
+        const r = new ReactiveStore(oState);
+        r.defineGetter('getCount', (state: StateType) => state.entities.length);
+        expect(r.getter.getCount).toBe(0);
+        r.state.entities.push(1);
+        expect(r.getter.getCount).toBe(1);
+        r.state.entities.splice(0, 1);
+        expect(r.state.entities.length).toBe(0);
+        expect(r.getter.getCount).toBe(0);
+    });
+
+    test('should update getter when asking for item 0 and changing item 0', () => {
+        type StateType = { entities: number[] };
+        const oState: StateType = { entities: [] };
+        const r = new ReactiveStore(oState);
+        r.defineGetter('getItem0', (state: StateType) =>
+            state.entities.length > 0 ? state.entities[0] : -1
+        );
+        expect(r.getter.getItem0).toBe(-1);
+        r.state.entities.push(1);
+        expect(r.getter.getItem0).toBe(1);
+        r.state.entities[0] = 3;
+        expect(r.getter.getItem0).toBe(3);
+    });
+
+    test('should update iterative getter when adding item', () => {
+        type StateType = { entities: number[] };
+        const oState: StateType = { entities: [] };
+        const r = new ReactiveStore(oState);
+        r.defineGetter('getSum', (state: StateType) => {
+            let n = 0;
+            for (const v of state.entities) {
+                n += v;
+            }
+            return n;
+        });
+        expect(r.getter.getSum).toBe(0);
+        r.state.entities.push(1);
+        expect(r.getter.getSum).toBe(1);
+        r.state.entities[0] = 3;
+        expect(r.getter.getSum).toBe(3);
+        r.state.entities.push(10);
+        expect(r.getter.getSum).toBe(13);
+    });
+
     test('should return 20 as sum of values in state { entities: [{ value: 10 }, { value: 6 }, { value: 4 }] }', () => {
         type StateType = { entities: { value: number }[] };
         const oState: StateType = { entities: [] };
         const r = new ReactiveStore(oState);
-        r.defineGetter('getSumValue', (state: StateType) =>
-            state.entities.reduce((acc, val) => acc + val.value, 0)
-        );
+        r.defineGetter('getSumValue', (state: StateType) => {
+            let n = 0;
+            for (const v of state.entities) {
+                n += v.value;
+            }
+            return n;
+        });
         expect(r.getter.getSumValue).toBe(0);
-        r.state.entities[0] = { value: 10 };
+        r.state.entities.push({ value: 10 });
         expect(r.state.entities[0].value).toBe(10);
-        console.log(r.getGetterData('getSumValue').depreg);
+        expect(r.getter.getSumValue).toBe(10);
+        r.state.entities.push({ value: 6 });
+        expect(r.getter.getSumValue).toBe(16);
+        r.state.entities.push({ value: 4 });
+        expect(r.getter.getSumValue).toBe(20);
+    });
+
+    test('should return 20 as sum of values when using array reducer, when all entites are already there', () => {
+        type StateType = { entities: { value: number }[] };
+        const oState: StateType = { entities: [{ value: 0 }, { value: 0 }, { value: 0 }] };
+        const r = new ReactiveStore(oState);
+        r.defineGetter('getSumValue', (state: StateType) => {
+            return state.entities.reduce((acc, v) => acc + v.value, 0);
+        });
+        expect(r.getter.getSumValue).toBe(0);
+        r.state.entities[0].value = 10;
+        r.state.entities[1].value = 6;
+        r.state.entities[2].value = 4;
+        expect(r.getter.getSumValue).toBe(20);
+    });
+
+    test('should return 20 as sum of values when using array reducer', () => {
+        type StateType = { entities: { value: number }[] };
+        const oState: StateType = { entities: [] };
+        const r = new ReactiveStore(oState);
+        r.defineGetter('getSumValue', (state: StateType) => {
+            return state.entities.reduce((acc, v) => acc + v.value, 0);
+        });
+        console.log('------ 1');
+        expect(r.getter.getSumValue).toBe(0);
+        console.log('------ 2');
+        r.state.entities.push({ value: 10 });
+        console.log('------ 3');
         expect(r.getter.getSumValue).toBe(10);
         r.state.entities.push({ value: 6 });
         expect(r.getter.getSumValue).toBe(16);

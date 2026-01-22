@@ -58,12 +58,6 @@ export class ReactiveStore<T extends object> {
         ) {
             return;
         }
-
-        // Ignore non existant properties
-        if (!Reflect.has(target, property)) {
-            return;
-        }
-        // Add the property to the dependency registry of all running effects
         this.runningEffects.forEach((effect) => {
             effect.depreg.add(target, property);
         });
@@ -75,11 +69,7 @@ export class ReactiveStore<T extends object> {
     trigger<X extends object>(target: X, property: string | symbol): void {
         for (const getter of Object.values(this.getterCollection)) {
             const depreg = getter.depreg;
-            let bInvalidate = false;
             if (depreg.has(target, property)) {
-                bInvalidate = true;
-            }
-            if (bInvalidate) {
                 this.trigger(getter, 'value');
                 getter.invalidate();
             }
@@ -142,15 +132,21 @@ export class ReactiveStore<T extends object> {
         if (property === SYMBOL_PROXY) {
             return true;
         }
-        console.log('array get', property, 'in array prototype ?', property in Array.prototype);
         if (typeof property === 'string' && property in Array.prototype) {
             const method = Array.prototype[property as keyof typeof Array.prototype];
-            console.log('type of', property, typeof method);
             if (typeof method === 'function') {
-                return (...args: any[]) => {
-                    const result = method.apply(target, args);
-                    console.log('apply', method, 'on', target);
-                    this.trigger(target, property);
+                return (...args: any[]): any => {
+                    const nPrevLength = target.length;
+                    const result = method.apply(
+                        target,
+                        args.map((x) => this.proxifyObject(x))
+                    );
+                    const nNewLength = target.length;
+                    this.track(target, SYMBOL_BASE_OBJECT);
+                    if (nNewLength !== nPrevLength) {
+                        this.trigger(target, SYMBOL_BASE_OBJECT);
+                        this.trigger(target, 'length');
+                    }
                     return result;
                 };
             }
@@ -165,24 +161,20 @@ export class ReactiveStore<T extends object> {
         value: any,
         receiver: any
     ): boolean {
-        // Si la propriété est un indice ou 'length', on proxifie la valeur
-        if (typeof property === 'string' && (property === 'length' || isPositiveNumber(property))) {
+        if (typeof property === 'string' && isPositiveNumber(property)) {
+            // This is a numeric index
             value = this.proxifyObject(value);
         }
-
-        console.log(value);
-        // Met à jour la propriété
         const nPrevLength = target.length;
         const result = Reflect.set(target, property, value, receiver);
         const nNewLength = target.length;
+        if (Array.isArray(target)) {
+            this.trigger(target, SYMBOL_BASE_OBJECT);
+        }
         if (nNewLength !== nPrevLength) {
-            console.log('new length', nNewLength);
             this.trigger(target, 'length');
         }
-
-        // Déclenche les listeners
         this.trigger(target, property);
-
         return result;
     }
 
@@ -215,6 +207,9 @@ export class ReactiveStore<T extends object> {
      * @returns {Proxy}
      */
     proxifyObject<X extends object>(oTarget: X): X {
+        if (typeof oTarget !== 'object') {
+            return oTarget;
+        }
         if (this.currentlyProxyfying.has(oTarget)) {
             return oTarget;
         }
