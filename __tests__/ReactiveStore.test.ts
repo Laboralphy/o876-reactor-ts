@@ -190,15 +190,171 @@ describe('State with array of objects', () => {
         r.defineGetter('getSumValue', (state: StateType) => {
             return state.entities.reduce((acc, v) => acc + v.value, 0);
         });
-        console.log('------ 1');
         expect(r.getter.getSumValue).toBe(0);
-        console.log('------ 2');
         r.state.entities.push({ value: 10 });
-        console.log('------ 3');
         expect(r.getter.getSumValue).toBe(10);
         r.state.entities.push({ value: 6 });
         expect(r.getter.getSumValue).toBe(16);
         r.state.entities.push({ value: 4 });
         expect(r.getter.getSumValue).toBe(20);
+    });
+});
+
+describe('Array prototype', () => {
+    type EntityType = {
+        name: string;
+        age: number;
+        role: string[];
+    };
+
+    type StateType = {
+        entities: EntityType[];
+    };
+
+    describe('ReactiveStore - Array Getters', () => {
+        let store: ReactiveStore<StateType>;
+
+        beforeEach(() => {
+            store = new ReactiveStore<StateType>({
+                entities: [
+                    { name: 'Alice', age: 25, role: ['admin'] },
+                    { name: 'Bob', age: 19, role: ['user'] },
+                    { name: 'Charlie', age: 30, role: ['admin', 'user'] },
+                ],
+            });
+        });
+
+        // Test 1 : Teste le getter utilisant `filter`
+        test('should filter entities by age', () => {
+            store.defineGetter('getFilterAge20', (state: StateType) =>
+                state.entities.filter((e) => e.age >= 20)
+            );
+            const result = store.getter.getFilterAge20;
+            expect(result).toHaveLength(2);
+            expect(result).toEqual([
+                { name: 'Alice', age: 25, role: ['admin'] },
+                { name: 'Charlie', age: 30, role: ['admin', 'user'] },
+            ]);
+            store.state.entities[1].age = 50;
+            const result2 = store.getter.getFilterAge20;
+            expect(result2).toHaveLength(3);
+            expect(result2).toEqual([
+                { name: 'Alice', age: 25, role: ['admin'] },
+                { name: 'Bob', age: 50, role: ['user'] },
+                { name: 'Charlie', age: 30, role: ['admin', 'user'] },
+            ]);
+        });
+
+        // Test 2 : Teste le getter utilisant `map`
+        test('should map entity names', () => {
+            store.defineGetter('getEntityNames', (state: StateType) =>
+                state.entities.map((e) => e.name)
+            );
+            const result = store.getter.getEntityNames;
+            expect(result).toEqual(['Alice', 'Bob', 'Charlie']);
+            store.state.entities.push({ name: 'Deborah', age: 22, role: [] });
+            const result2 = store.getter.getEntityNames;
+            expect(result2).toEqual(['Alice', 'Bob', 'Charlie', 'Deborah']);
+        });
+
+        // Test 3 : Teste le getter utilisant `reduce`
+        test('should reduce to total age', () => {
+            store.defineGetter('getTotalAge', (state: StateType) =>
+                state.entities.reduce((sum, e) => sum + e.age, 0)
+            );
+            const result = store.getter.getTotalAge;
+            expect(result).toBe(74);
+        });
+
+        // Test 4 : Teste le getter utilisant `find`
+        test('should find entity by name', () => {
+            store.defineGetter('getEntityByName', (state: StateType) =>
+                state.entities.find((e) => e.name === 'Bob')
+            );
+            const result = store.getter.getEntityByName;
+            expect(result).toEqual({ name: 'Bob', age: 19, role: ['user'] });
+        });
+
+        // Test 5 : Teste le getter utilisant `some`
+        test('should check if some entity is admin', () => {
+            store.defineGetter('hasAdmin', (state: StateType) =>
+                state.entities.some((e) => e.role.includes('admin'))
+            );
+            const result = store.getter.hasAdmin;
+            expect(result).toBe(true);
+        });
+
+        // Test 6 : Teste le getter utilisant `every`
+        test('should check if every entity is at least 18', () => {
+            store.defineGetter('allAdults', (state: StateType) =>
+                state.entities.every((e) => e.age >= 18)
+            );
+            const result = store.getter.allAdults;
+            expect(result).toBe(true);
+        });
+
+        // Test 7 : Teste la réactivité du getter `filter` après modification du state
+        test('should update filter getter when state changes', () => {
+            store.defineGetter('getFilterAge20', (state: StateType) =>
+                state.entities.filter((e) => e.age >= 20)
+            );
+            expect(store.getter.getFilterAge20).toHaveLength(2);
+            store.state.entities.push({ name: 'David', age: 22, role: ['user'] });
+            expect(store.getter.getFilterAge20).toHaveLength(3);
+        });
+
+        // Test 8 : Teste la réactivité du getter `map` après modification du state
+        test('should update map getter when state changes', () => {
+            store.defineGetter('getEntityNames', (state: StateType) =>
+                state.entities.map((e) => e.name)
+            );
+            expect(store.getter.getEntityNames).toEqual(['Alice', 'Bob', 'Charlie']);
+            store.state.entities.push({ name: 'David', age: 22, role: ['user'] });
+            expect(store.getter.getEntityNames).toEqual(['Alice', 'Bob', 'Charlie', 'David']);
+        });
+
+        // Test 9 : Teste la réactivité du getter `reduce` après modification du state
+        test('should update reduce getter when state changes', () => {
+            store.defineGetter('getTotalAge', (state: StateType) =>
+                state.entities.reduce((sum, e) => sum + e.age, 0)
+            );
+            expect(store.getter.getTotalAge).toBe(74);
+            store.state.entities.push({ name: 'David', age: 22, role: ['user'] });
+            expect(store.getter.getTotalAge).toBe(96);
+        });
+
+        // Test 10 : Teste la réactivité du getter `find` après modification du state
+        test('should update find getter when state changes', () => {
+            store.defineGetter('getEntityByName', (state: StateType) =>
+                state.entities.find((e) => e.name === 'David')
+            );
+            expect(store.getter.getEntityByName).toBeUndefined();
+            store.state.entities.push({ name: 'David', age: 22, role: ['user'] });
+            expect(store.getter.getEntityByName).toEqual({
+                name: 'David',
+                age: 22,
+                role: ['user'],
+            });
+        });
+
+        // Test 11 : Teste la réactivité du getter `some` après modification du state
+        test('should update some getter when state changes', () => {
+            store.defineGetter('hasAdmin', (state: StateType) =>
+                state.entities.some((e) => e.role.includes('admin'))
+            );
+            expect(store.getter.hasAdmin).toBe(true);
+            store.state.entities = store.state.entities.map((e) => ({ ...e, role: ['user'] }));
+            expect(store.getter.hasAdmin).toBe(false);
+        });
+
+        // Test 12 : Teste la réactivité du getter `every` après modification du state
+        test('should update every getter when state changes', () => {
+            store.defineGetter('allAdults', (state: StateType) =>
+                state.entities.every((e) => e.age >= 18)
+            );
+            expect(store.getter.allAdults).toBe(true);
+            store.state.entities.push({ name: 'Eve', age: 17, role: ['user'] });
+            expect(store.getter.allAdults).toBe(false);
+        });
     });
 });

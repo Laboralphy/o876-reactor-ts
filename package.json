@@ -1,10 +1,10 @@
 {
-    "name": "o876-reactor",
+    "name": "@laboralphy/reactor",
     "version": "1.0.0",
-    "description": "",
+    "description": "Reactive store manager",
     "main": "src/ReactiveStore.ts",
     "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1"
+        "test": "jest"
     },
     "keywords": [],
     "author": "",

@@ -32,6 +32,11 @@ export class ReactiveStore<T extends object> {
         this.state = this.proxifyObject(initialState);
     }
 
+    /**
+     * Returns a Getter instance, see Getter class for more information
+     * @param getterName
+     * @return Getter
+     */
     getGetterData(getterName: string) {
         if (getterName in this.getterCollection) {
             return this.getterCollection[getterName];
@@ -294,9 +299,16 @@ export class ReactiveStore<T extends object> {
         if (!getter) {
             throw new ReferenceError(`Getter ${name} not found`);
         }
+        if (!getter.invalid) {
+            this.track(getter, 'value');
+            return getter.value;
+        }
+
+        getter.depreg.reset();
         this.createEffect(() => {
             getter.run(this.state, this.getter);
         }, getter.depreg);
+        this.track(getter, 'value');
         return getter.value;
     }
 }

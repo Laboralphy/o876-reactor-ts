@@ -1,5 +1,5 @@
 export class DependencyRegistry {
-    private readonly _properties = new Map<string | symbol, Set<object>>();
+    private readonly _properties = new Map<string | symbol, WeakSet<object>>();
     constructor() {}
 
     add<T extends object>(target: T, property: string | symbol) {
@@ -7,7 +7,7 @@ export class DependencyRegistry {
         if (px) {
             px.add(target);
         } else {
-            this._properties.set(property, new Set([target]));
+            this._properties.set(property, new WeakSet([target]));
         }
     }
 

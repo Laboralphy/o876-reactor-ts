@@ -8,7 +8,11 @@ export type GetterCollection<T> = {
 export type GetterRegistry = Record<string, () => any>;
 
 /**
- * This class will manage a Getter and all associated data
+ * This class will manage a Getter and all associated data,
+ * Associated data is typically :
+ * - value : the computed getter value
+ * - invalid : the invalidity flag
+ * - depreg : the dependency registry
  */
 export class Getter<T, R> {
     // The cached value ; valid until one of the getter dependencies changes
@@ -18,6 +22,7 @@ export class Getter<T, R> {
     private _invalid: boolean = true;
     // The dependency registry store all getter dependencies
     // a dependency is a tuple (target, property)
+    // if a registered (target, property) changes its value, the invalidity flag is set to true
     private readonly _depreg = new DependencyRegistry();
 
     /**
