@@ -5,7 +5,7 @@ export type GetterFunction<T, R> = (state: T, getters: GetterRegistry) => R;
 export type GetterCollection<T> = {
     [key: string]: Getter<T, any>;
 };
-export type GetterRegistry = Record<string, () => any>;
+export type GetterRegistry = Record<string, any>;
 
 /**
  * This class will manage a Getter and all associated data,

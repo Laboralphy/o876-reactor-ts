@@ -1,6 +1,6 @@
 {
     "name": "@laboralphy/reactor",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "Reactive store manager",
     "main": "src/ReactiveStore.ts",
     "scripts": {
@@ -10,6 +10,9 @@
     "author": "",
     "license": "ISC",
     "type": "module",
+    "publishConfig": {
+        "access": "public"
+    },
     "devDependencies": {
         "@types/jest": "^30.0.0",
         "@types/node": "^25.0.9",

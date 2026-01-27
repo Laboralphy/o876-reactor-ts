@@ -21,7 +21,7 @@ class Effect {
 
 export class ReactiveStore<T extends object> {
     public readonly state: T;
-    public getter: GetterRegistry = {};
+    public getters: GetterRegistry = {};
     private readonly getterCollection: GetterCollection<T> = {};
     // When a getter is run, each time a state property is changed
     // all running effect are iterated, and dependencies are updated
@@ -282,7 +282,7 @@ export class ReactiveStore<T extends object> {
 
     defineGetter<R>(name: string, getter: GetterFunction<T, R>) {
         this.getterCollection[name] = new Getter(getter);
-        Object.defineProperty(this.getter, name, {
+        Object.defineProperty(this.getters, name, {
             get: (): R => {
                 // Appelle `runGetter` quand la propriété est accédée
                 return this.runGetter(name);
@@ -306,7 +306,7 @@ export class ReactiveStore<T extends object> {
 
         getter.depreg.reset();
         this.createEffect(() => {
-            getter.run(this.state, this.getter);
+            getter.run(this.state, this.getters);
         }, getter.depreg);
         this.track(getter, 'value');
         return getter.value;
