@@ -395,35 +395,75 @@ describe('Array getter recompute', () => {
             nCalled++;
             return state.entities.filter((e) => e.role.includes('admin')).map((e) => e.name);
         });
-        const a1 = store.getters.getAdmins;
-        expect(nCalled).toBe(1);
         const a11 = store.getters.getAdmins;
+        expect(nCalled).toBe(1);
         expect(a11.includes('David')).toBe(false);
-        const a12 = store.getters.getAdmins;
-        expect(nCalled).toBe(1);
         const a13 = store.getters.getAdmins;
-        expect(a13.includes('Charlie')).toBe(true);
-        const a14 = store.getters.getAdmins;
         expect(nCalled).toBe(1);
+        expect(a13.includes('Charlie')).toBe(true);
         const a15 = store.getters.getAdmins;
         expect(a15.includes('Alice')).toBe(false);
-        const a16 = store.getters.getAdmins;
         expect(nCalled).toBe(1);
-        const a17 = store.getters.getAdmins;
         store.state.entities[4].role.push('admin');
-        expect(nCalled).toBe(1);
-        const a2 = store.getters.getAdmins;
-        expect(nCalled).toBe(2);
         const a21 = store.getters.getAdmins;
         expect(a21.includes('David')).toBe(false);
-        const a22 = store.getters.getAdmins;
         expect(nCalled).toBe(2);
         const a23 = store.getters.getAdmins;
         expect(a23.includes('Charlie')).toBe(true);
-        const a24 = store.getters.getAdmins;
         expect(nCalled).toBe(2);
         const a25 = store.getters.getAdmins;
         expect(a25.includes('Alice')).toBe(true);
+        expect(nCalled).toBe(2);
+    });
+});
+
+describe('getter calling other getters', () => {
+    test('should call other getters', () => {
+        const store = new ReactiveStore({
+            entities: [
+                {
+                    name: 'David',
+                    age: 18,
+                    role: ['user'],
+                },
+                {
+                    name: 'Eve',
+                    age: 20,
+                    role: ['user'],
+                },
+                {
+                    name: 'Charlie',
+                    age: 30,
+                    role: ['admin'],
+                },
+                {
+                    name: 'Bob',
+                    age: 40,
+                    role: ['user'],
+                },
+                {
+                    name: 'Alice',
+                    age: 25,
+                    role: ['user', 'moderator'],
+                },
+            ],
+        });
+        store.defineGetter('getAdmins', (state): string[] => {
+            return state.entities.filter((e) => e.role.includes('admin')).map((e) => e.name);
+        });
+        let nCalled = 0;
+        store.defineGetter('getAdminCount', (state, getters): string[] => {
+            ++nCalled;
+            return getters.getAdmins.length;
+        });
+        expect(store.getters.getAdmins).toEqual(['Charlie']);
+        expect(store.getters.getAdminCount).toBe(1);
+        expect(nCalled).toBe(1);
+        expect(store.getters.getAdminCount).toBe(1);
+        expect(nCalled).toBe(1);
+        store.state.entities[4].role.push('admin');
+        expect(store.getters.getAdmins).toEqual(['Charlie', 'Alice']);
+        expect(store.getters.getAdminCount).toBe(2);
         expect(nCalled).toBe(2);
     });
 });
