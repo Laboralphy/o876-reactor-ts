@@ -19,10 +19,13 @@ class Effect {
     }
 }
 
-export class ReactiveStore<T extends object> {
+export class ReactiveStore<
+    T extends object,
+    G extends Record<string, GetterFunction<T, any, GetterRegistry<T, G>>>,
+> {
     public readonly state: T;
-    public getters: GetterRegistry = {};
-    private readonly getterCollection: GetterCollection<T> = {};
+    public getters: GetterRegistry<T, G> = {} as GetterRegistry<T, G>;
+    private readonly getterCollection: Record<string, Getter<T, any, GetterRegistry<T, G>>> = {};
     // When a getter is run, each time a state property is changed
     // all running effect are iterated, and dependencies are updated
     private readonly runningEffects: Effect[] = [];

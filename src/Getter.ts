@@ -1,12 +1,13 @@
 import { DependencyRegistry } from './DependencyRegistry';
 
 // A getter is a function that computes a result out of the state
-export type GetterFunction<T, R> = (state: T, getters: GetterRegistry) => R;
+export type GetterFunction<T, R, G extends Record<string, any>> = (state: T, getters: G) => R;
 export type GetterCollection<T> = {
     [key: string]: Getter<T, any>;
 };
-export type GetterRegistry = Record<string, any>;
-
+export type GetterRegistry<T, G extends Record<string, GetterFunction<T, any, G>>> = {
+    [K in keyof G]: ReturnType<G[K]>;
+};
 /**
  * This class will manage a Getter and all associated data,
  * Associated data is typically :
@@ -14,9 +15,9 @@ export type GetterRegistry = Record<string, any>;
  * - invalid : the invalidity flag
  * - depreg : the dependency registry
  */
-export class Getter<T, R> {
+export class Getter<T, R, G extends Record<string, any>> {
     // The cached value ; valid until one of the getter dependencies changes
-    private _cache: any = undefined;
+    private _cache: R | undefined = undefined;
     // Set to true when a dependency is change, and the value needs to be re-evaluated
     // set to false when getter value is re-evaluated
     private _invalid: boolean = true;
@@ -66,11 +67,11 @@ export class Getter<T, R> {
 
     /**
      * return the getter value, if valid.
-     * else, recompute getter value before returning it
+     * else, recompute the getter value before returning it
      * @param state
      * @param getters
      */
-    run(state: T, getters: GetterRegistry) {
+    run(state: T, getters: G): R {
         if (this.invalid) {
             this._cache = this.fn(state, getters);
             this._invalid = false;
