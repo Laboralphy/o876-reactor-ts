@@ -1,7 +1,7 @@
 import { DependencyRegistry } from './DependencyRegistry';
 
 // A getter is a function that computes a result out of the state
-export type GetterFunction<T, R, G extends Record<string, any>> = (state: T, getters: G) => R;
+export type GetterFunction<S, R, G extends Record<string, any>> = (state: S, getters: G) => R;
 export type GetterCollection<T> = {
     [key: string]: Getter<T, any>;
 };

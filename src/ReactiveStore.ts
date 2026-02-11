@@ -4,7 +4,7 @@ import { SYMBOL_BASE_OBJECT, SYMBOL_PROXY } from './symbols';
 import { isPositiveNumber, isReactiveObject } from './functions';
 
 /**
- * Effect function are used in the dependency collecting mechanism
+ * Effect function is used in the dependency collecting mechanism
  */
 type EffectFunction = () => void;
 
@@ -20,33 +20,33 @@ class Effect {
 }
 
 export class ReactiveStore<
-    T extends object,
-    G extends Record<string, GetterFunction<T, any, GetterRegistry<T, G>>>,
+    S extends object,
+    G extends Record<string, GetterFunction<S, any, GetterRegistry<S, G>>>,
 > {
-    public readonly state: T;
-    public getters: GetterRegistry<T, G> = {} as GetterRegistry<T, G>;
-    private readonly getterCollection: Record<string, Getter<T, any, GetterRegistry<T, G>>> = {};
+    public readonly state: S;
+    public getters: GetterRegistry<S, G> = {} as GetterRegistry<S, G>;
+    private readonly getterCollection: Record<string, Getter<S, any, GetterRegistry<S, G>>> = {};
     // When a getter is run, each time a state property is changed
     // all running effect are iterated, and dependencies are updated
     private readonly runningEffects: Effect[] = [];
     private readonly currentlyProxyfying = new WeakSet<object>();
 
-    constructor(initialState: T) {
+    constructor(initialState: S) {
         this.state = this.proxifyObject(initialState);
     }
 
-    /**
-     * Returns a Getter instance, see Getter class for more information
-     * @param getterName
-     * @return Getter
-     */
-    getGetterData(getterName: string) {
-        if (getterName in this.getterCollection) {
-            return this.getterCollection[getterName];
-        } else {
-            throw new ReferenceError(`getter ${getterName} not found`);
-        }
-    }
+    // /**
+    //  * Returns a Getter instance, see Getter class for more information
+    //  * @param getterName
+    //  * @return Getter
+    //  */
+    // getGetterData(getterName: string) {
+    //     if (getterName in this.getterCollection) {
+    //         return this.getterCollection[getterName];
+    //     } else {
+    //         throw new ReferenceError(`getter ${getterName} not found`);
+    //     }
+    // }
 
     /**
      * This function is usually called by Proxy handler to notify that a (target, property) has been modified
@@ -274,44 +274,42 @@ export class ReactiveStore<
             this.runningEffects.push(effect);
             try {
                 fn();
-            } catch (e) {
-                throw e;
             } finally {
                 this.runningEffects.pop();
             }
         }, depreg);
         effect.run();
     }
-
-    defineGetter<R>(name: string, getter: GetterFunction<T, R>) {
-        this.getterCollection[name] = new Getter(getter);
-        Object.defineProperty(this.getters, name, {
-            get: (): R => {
-                // Appelle `runGetter` quand la propriété est accédée
-                return this.runGetter(name);
-            },
-            enumerable: true,
-            configurable: true,
-        });
-    }
-
-    runGetter<Key extends keyof GetterCollection<T>>(
-        name: Key
-    ): ReturnType<GetterCollection<T>[Key]['run']> {
-        const getter = this.getterCollection[name];
-        if (!getter) {
-            throw new ReferenceError(`Getter ${name} not found`);
-        }
-        if (!getter.invalid) {
-            this.track(getter, 'value');
-            return getter.value;
-        }
-
-        getter.depreg.reset();
-        this.createEffect(() => {
-            getter.run(this.state, this.getters);
-        }, getter.depreg);
-        this.track(getter, 'value');
-        return getter.value;
-    }
+    //
+    // defineGetter<R>(name: string, getter: GetterFunction<S, R>) {
+    //     this.getterCollection[name] = new Getter(getter);
+    //     Object.defineProperty(this.getters, name, {
+    //         get: (): R => {
+    //             // Appelle `runGetter` quand la propriété est accédée
+    //             return this.runGetter(name);
+    //         },
+    //         enumerable: true,
+    //         configurable: true,
+    //     });
+    // }
+    //
+    // runGetter<Key extends keyof GetterCollection<S>>(
+    //     name: Key
+    // ): ReturnType<GetterCollection<S>[Key]['run']> {
+    //     const getter = this.getterCollection[name];
+    //     if (!getter) {
+    //         throw new ReferenceError(`Getter ${name} not found`);
+    //     }
+    //     if (!getter.invalid) {
+    //         this.track(getter, 'value');
+    //         return getter.value;
+    //     }
+    //
+    //     getter.depreg.reset();
+    //     this.createEffect(() => {
+    //         getter.run(this.state, this.getters);
+    //     }, getter.depreg);
+    //     this.track(getter, 'value');
+    //     return getter.value;
+    // }
 }
