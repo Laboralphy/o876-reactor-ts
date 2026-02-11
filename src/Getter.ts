@@ -1,12 +1,32 @@
 import { DependencyRegistry } from './DependencyRegistry';
-import { ReactiveStore } from './ReactiveStore';
 
-// A getter is a function that computes a result out of the state
-export type GetterFunction<T extends object, R> = (store: ReactiveStore<T>) => R;
-export type GetterCollection<T extends object> = {
-    [key: string]: Getter<T, any>;
+/**
+ * This is the interface of definition of getters
+ */
+export interface IGetterDefinition<S extends object> {
+    [name: string]: (state: S, getters: GetterRegistry) => any;
+}
+
+// /**
+//  * A getter collection, collects all Getter instance
+//  * This is useful to quickly recover data about any getter (cached value, dependency registry...)
+//  */
+// export interface GetterCollection<T extends object> {
+//     [key: string]: Getter<T, any>;
+// }
+
+export type GetterCollection<S extends object> = {
+    [K in keyof IGetterDefinition<S>]: Getter<S, ReturnType<IGetterDefinition<S>[K]>>;
 };
-export type GetterRegistry = Record<string, any>;
+
+/**
+ * A getter registry is an object that holds the type of all final getters
+ * In this object, getter are no longer function but real getter properties that triggers
+ * a run function of one item of the getterCollection
+ */
+export interface GetterRegistry {
+    [name: string]: any;
+}
 
 /**
  * This class will manage a Getter and all associated data,
@@ -15,7 +35,7 @@ export type GetterRegistry = Record<string, any>;
  * - invalid : the invalidity flag
  * - depreg : the dependency registry
  */
-export class Getter<T extends object, R> {
+export class Getter<S extends object, R> {
     // The cached value ; valid until one of the getter dependencies changes
     private _cache: any = undefined;
     // Set to true when a dependency is change, and the value needs to be re-evaluated
@@ -30,7 +50,7 @@ export class Getter<T extends object, R> {
      * The constructor accepts a function that is the getter computation code
      * @param fn
      */
-    constructor(private readonly fn: (store: ReactiveStore<T, any>) => R) {}
+    constructor(private readonly fn: (state: S, getters: GetterRegistry) => R) {}
 
     /**
      * Returns true is getter value is valid
@@ -69,9 +89,9 @@ export class Getter<T extends object, R> {
      * return the getter value, if valid.
      * else, recompute getter value before returning it
      */
-    run(store: ReactiveStore<T>) {
+    run(state: S, getters: GetterRegistry): R {
         if (this.invalid) {
-            this._cache = this.fn(store);
+            this._cache = this.fn(state, getters);
             this._invalid = false;
         }
         return this._cache;
