@@ -607,8 +607,8 @@ describe('getter calling other getters', () => {
         expect(store.getters.getAdminCount).toBe(1);
         expect(nCalled).toBe(1);
         store.state.entities[4].role.push('admin');
-        expect(store.getters.getAdmins).toEqual(['Charlie', 'Alice']);
         expect(store.getters.getAdminCount).toBe(2);
+        expect(store.getters.getAdmins).toEqual(['Charlie', 'Alice']);
         expect(nCalled).toBe(2);
     });
 });
