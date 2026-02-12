@@ -1,5 +1,5 @@
 import { DependencyRegistry } from './DependencyRegistry';
-import { Getter, GetterCollection, GetterFunction, GetterRegistry } from './Getter';
+import { Getter, GetterCollection, GetterRegistry, IGetterDefinition } from './Getter';
 import { SYMBOL_BASE_OBJECT, SYMBOL_PROXY } from './symbols';
 import { isPositiveNumber, isReactiveObject } from './functions';
 
@@ -19,17 +19,31 @@ class Effect {
     }
 }
 
-export class ReactiveStore<T extends object> {
-    public readonly state: T;
-    public getters: GetterRegistry = {};
-    private readonly getterCollection: GetterCollection<T> = {};
+export class ReactiveStore<S extends object, R extends GetterRegistry> {
+    public readonly state: S;
+    private readonly getterCollection: GetterCollection<S> = {};
+    private readonly _getters: GetterRegistry;
     // When a getter is run, each time a state property is changed
     // all running effect are iterated, and dependencies are updated
     private readonly runningEffects: Effect[] = [];
     private readonly currentlyProxyfying = new WeakSet<object>();
 
-    constructor(initialState: T) {
+    constructor(initialState: S, getters: IGetterDefinition<S>) {
         this.state = this.proxifyObject(initialState);
+        const registeredGetters: GetterRegistry = {};
+        for (const [n, g] of Object.entries(getters)) {
+            this.getterCollection[n] = new Getter<S, ReturnType<typeof g>>(g);
+            Object.defineProperty(registeredGetters, n, {
+                get: (): ReturnType<typeof g> => this.runGetter(n),
+                enumerable: true,
+                configurable: true,
+            });
+        }
+        this._getters = registeredGetters;
+    }
+
+    get getters(): R {
+        return this._getters as R;
     }
 
     /**
@@ -280,24 +294,12 @@ export class ReactiveStore<T extends object> {
         effect.run();
     }
 
-    defineGetter<R>(name: string, getter: GetterFunction<T, R>) {
-        this.getterCollection[name] = new Getter(getter);
-        Object.defineProperty(this.getters, name, {
-            get: (): R => {
-                // Appelle `runGetter` quand la propriété est accédée
-                return this.runGetter(name);
-            },
-            enumerable: true,
-            configurable: true,
-        });
-    }
-
-    runGetter<Key extends keyof GetterCollection<T>>(
+    runGetter<Key extends keyof GetterCollection<S>>(
         name: Key
-    ): ReturnType<GetterCollection<T>[Key]['run']> {
+    ): ReturnType<GetterCollection<S>[Key]['run']> {
         const getter = this.getterCollection[name];
         if (!getter) {
-            throw new ReferenceError(`Getter ${name} not found`);
+            throw new ReferenceError(`Getter ${name.toString()} not found`);
         }
         if (!getter.invalid) {
             this.track(getter, 'value');
@@ -306,7 +308,7 @@ export class ReactiveStore<T extends object> {
 
         getter.depreg.reset();
         this.createEffect(() => {
-            getter.run(this.state, this.getters);
+            getter.run(this.state, this._getters as R);
         }, getter.depreg);
         this.track(getter, 'value');
         return getter.value;
