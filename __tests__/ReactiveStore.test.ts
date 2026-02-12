@@ -593,7 +593,7 @@ describe('getter calling other getters', () => {
                 ],
             },
             {
-                getAdminCount: (state, getters: GetterRegistry) => {
+                getAdminCount: (state, getters: MyGetters) => {
                     ++nCalled;
                     return getters.getAdmins.length;
                 },

@@ -4,7 +4,7 @@ import { DependencyRegistry } from './DependencyRegistry';
  * This is the interface of definition of getters
  */
 export interface IGetterDefinition<S extends object> {
-    [name: string]: (state: S, getters: GetterRegistry) => any;
+    [name: string]: (state: S, getters: any) => any;
 }
 
 // /**
