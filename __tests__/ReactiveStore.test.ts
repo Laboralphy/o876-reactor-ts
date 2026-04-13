@@ -612,3 +612,75 @@ describe('getter calling other getters', () => {
         expect(nCalled).toBe(2);
     });
 });
+
+describe('In-place mutating array methods', () => {
+    test('sort: getter should be invalidated even though length does not change', () => {
+        type StateType = { values: number[] };
+        const store = new ReactiveStore<StateType, { getSorted: number[] }>(
+            { values: [3, 1, 2] },
+            { getSorted: (state) => [...state.values] }
+        );
+        expect(store.getters.getSorted).toEqual([3, 1, 2]);
+        store.state.values.sort((a, b) => a - b);
+        expect(store.getters.getSorted).toEqual([1, 2, 3]);
+    });
+
+    test('reverse: getter should be invalidated even though length does not change', () => {
+        type StateType = { values: number[] };
+        const store = new ReactiveStore<StateType, { getValues: number[] }>(
+            { values: [1, 2, 3] },
+            { getValues: (state) => [...state.values] }
+        );
+        expect(store.getters.getValues).toEqual([1, 2, 3]);
+        store.state.values.reverse();
+        expect(store.getters.getValues).toEqual([3, 2, 1]);
+    });
+
+    test('fill: getter should be invalidated even though length does not change', () => {
+        type StateType = { values: number[] };
+        const store = new ReactiveStore<StateType, { getValues: number[] }>(
+            { values: [1, 2, 3] },
+            { getValues: (state) => [...state.values] }
+        );
+        expect(store.getters.getValues).toEqual([1, 2, 3]);
+        store.state.values.fill(0);
+        expect(store.getters.getValues).toEqual([0, 0, 0]);
+    });
+});
+
+describe('New primitive properties on state objects', () => {
+    test('getter using Object.keys should be invalidated when a new primitive property is added', () => {
+        type StateType = { config: Record<string, number> };
+        const store = new ReactiveStore<StateType, { getKeys: string[] }>(
+            { config: { a: 1 } },
+            { getKeys: (state) => Object.keys(state.config) }
+        );
+        expect(store.getters.getKeys).toEqual(['a']);
+        (store.state.config as Record<string, number>).b = 2;
+        expect(store.getters.getKeys).toEqual(['a', 'b']);
+    });
+});
+
+describe('Array element deletion', () => {
+    test('getter using spread should be invalidated when an element is deleted', () => {
+        type StateType = { values: number[] };
+        const store = new ReactiveStore<StateType, { getValues: number[] }>(
+            { values: [1, 2, 3] },
+            { getValues: (state) => [...state.values] }
+        );
+        expect(store.getters.getValues).toEqual([1, 2, 3]);
+        delete (store.state.values as number[])[1];
+        expect(store.getters.getValues).toEqual([1, undefined, 3]);
+    });
+
+    test('getter using direct index access should be invalidated when that element is deleted', () => {
+        type StateType = { values: number[] };
+        const store = new ReactiveStore<StateType, { getFirst: number | undefined }>(
+            { values: [1, 2, 3] },
+            { getFirst: (state) => state.values[0] }
+        );
+        expect(store.getters.getFirst).toBe(1);
+        delete (store.state.values as number[])[0];
+        expect(store.getters.getFirst).toBeUndefined();
+    });
+});

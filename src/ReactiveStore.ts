@@ -8,10 +8,17 @@ import { isPositiveNumber, isReactiveObject } from './functions';
  */
 type EffectFunction = () => void;
 
+/**
+ * Array methods that mutate contents in-place without necessarily changing length.
+ * These must always trigger SYMBOL_BASE_OBJECT even when length is unchanged.
+ */
+const IN_PLACE_MUTATING_METHODS = new Set(['sort', 'reverse', 'fill', 'copyWithin']);
+
 class Effect {
     constructor(
         private readonly fn: EffectFunction,
-        public readonly depreg: DependencyRegistry
+        public readonly depreg: DependencyRegistry,
+        public readonly getter: Getter<any, any>
     ) {}
 
     run() {
@@ -27,6 +34,12 @@ export class ReactiveStore<S extends object, R extends GetterRegistry> {
     // all running effect are iterated, and dependencies are updated
     private readonly runningEffects: Effect[] = [];
     private readonly currentlyProxyfying = new WeakSet<object>();
+    // Reverse index: maps (target, property) → set of getters that depend on it.
+    // Allows trigger() to find affected getters in O(k) instead of scanning all getters.
+    private readonly reverseIndex = new WeakMap<
+        object,
+        Map<string | symbol, Set<Getter<S, any>>>
+    >();
 
     constructor(initialState: S, getters: IGetterDefinition<S>) {
         this.state = this.proxifyObject(initialState);
@@ -77,21 +90,53 @@ export class ReactiveStore<S extends object, R extends GetterRegistry> {
         ) {
             return;
         }
-        this.runningEffects.forEach((effect) => {
-            effect.depreg.add(target, property);
-        });
+        for (const effect of this.runningEffects) {
+            if (effect.depreg.add(target, property)) {
+                this.addToReverseIndex(target, property, effect.getter);
+            }
+        }
     }
 
     /**
      * When a property of a target is being changed, all dependant getters are to be invalidated.
+     * Uses the reverse index for O(k) lookup instead of scanning all getters.
      */
     trigger<X extends object>(target: X, property: string | symbol): void {
-        for (const getter of Object.values(this.getterCollection)) {
-            const depreg = getter.depreg;
-            if (depreg.has(target, property)) {
-                this.trigger(getter, 'value');
-                getter.invalidate();
-            }
+        const propMap = this.reverseIndex.get(target);
+        if (!propMap) {
+            return;
+        }
+        const getterSet = propMap.get(property);
+        if (!getterSet || getterSet.size === 0) {
+            return;
+        }
+        for (const getter of getterSet) {
+            this.trigger(getter, 'value');
+            getter.invalidate();
+        }
+    }
+
+    private addToReverseIndex(
+        target: object,
+        property: string | symbol,
+        getter: Getter<S, any>
+    ): void {
+        let propMap = this.reverseIndex.get(target);
+        if (!propMap) {
+            propMap = new Map();
+            this.reverseIndex.set(target, propMap);
+        }
+        let getterSet = propMap.get(property);
+        if (!getterSet) {
+            getterSet = new Set();
+            propMap.set(property, getterSet);
+        }
+        getterSet.add(getter);
+    }
+
+    private removeGetterFromReverseIndex(getter: Getter<S, any>): void {
+        for (const [target, property] of getter.depreg.entries()) {
+            this.reverseIndex.get(target)?.get(property)?.delete(getter);
         }
     }
 
@@ -110,10 +155,9 @@ export class ReactiveStore<S extends object, R extends GetterRegistry> {
         value: any,
         receiver: any
     ): boolean {
-        let bNewProperty: boolean = false;
+        const bNewProperty = !(property in target);
         let result: boolean;
         if (typeof value === 'object' && value !== null) {
-            bNewProperty = !(property in target);
             result = Reflect.set(target, property, this.proxifyObject(value), receiver);
         } else {
             result = Reflect.set(target, property, value, receiver);
@@ -162,8 +206,10 @@ export class ReactiveStore<S extends object, R extends GetterRegistry> {
                     );
                     const nNewLength = target.length;
                     this.track(target, SYMBOL_BASE_OBJECT);
-                    if (nNewLength !== nPrevLength) {
+                    if (nNewLength !== nPrevLength || IN_PLACE_MUTATING_METHODS.has(property)) {
                         this.trigger(target, SYMBOL_BASE_OBJECT);
+                    }
+                    if (nNewLength !== nPrevLength) {
                         this.trigger(target, 'length');
                     }
                     return result;
@@ -171,6 +217,16 @@ export class ReactiveStore<S extends object, R extends GetterRegistry> {
             }
         }
         this.track(target, property);
+        // Reading an element by index or accessing the iterator means the getter cares
+        // about the array's contents, so also depend on SYMBOL_BASE_OBJECT.
+        // This ensures in-place mutations (sort, reverse, fill, copyWithin) that trigger
+        // SYMBOL_BASE_OBJECT will properly invalidate such getters.
+        if (
+            property === Symbol.iterator ||
+            (typeof property === 'string' && isPositiveNumber(property))
+        ) {
+            this.track(target, SYMBOL_BASE_OBJECT);
+        }
         return Reflect.get(target, property, receiver);
     }
 
@@ -210,10 +266,11 @@ export class ReactiveStore<S extends object, R extends GetterRegistry> {
     }
 
     handlerArrayDeleteProperty<X extends any[]>(target: X, property: string | symbol): boolean {
-        const result = Reflect.deleteProperty(target, property);
         const nPrevLength = target.length;
-        this.trigger(target, property);
+        const result = Reflect.deleteProperty(target, property);
         const nNewLength = target.length;
+        this.trigger(target, property);
+        this.trigger(target, SYMBOL_BASE_OBJECT);
         if (nNewLength !== nPrevLength) {
             this.trigger(target, 'length');
         }
@@ -280,17 +337,19 @@ export class ReactiveStore<S extends object, R extends GetterRegistry> {
      * Creates an effect that push itself onto a stack
      * in order to keep track of what's currently running.
      */
-    createEffect(fn: EffectFunction, depreg: DependencyRegistry) {
-        const effect = new Effect(() => {
-            this.runningEffects.push(effect);
-            try {
-                fn();
-            } catch (e) {
-                throw e;
-            } finally {
-                this.runningEffects.pop();
-            }
-        }, depreg);
+    createEffect(fn: EffectFunction, depreg: DependencyRegistry, getter: Getter<S, any>) {
+        const effect = new Effect(
+            () => {
+                this.runningEffects.push(effect);
+                try {
+                    fn();
+                } finally {
+                    this.runningEffects.pop();
+                }
+            },
+            depreg,
+            getter
+        );
         effect.run();
     }
 
@@ -306,10 +365,15 @@ export class ReactiveStore<S extends object, R extends GetterRegistry> {
             return getter.value;
         }
 
+        this.removeGetterFromReverseIndex(getter);
         getter.depreg.reset();
-        this.createEffect(() => {
-            getter.run(this.state, this._getters as R);
-        }, getter.depreg);
+        this.createEffect(
+            () => {
+                getter.run(this.state, this._getters as R);
+            },
+            getter.depreg,
+            getter
+        );
         this.track(getter, 'value');
         return getter.value;
     }
