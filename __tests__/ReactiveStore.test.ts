@@ -1,5 +1,6 @@
+import { describe, test, expect } from 'vitest';
 import { ReactiveStore } from '../src/ReactiveStore';
-import { GetterRegistry, IGetterDefinition } from '../src/Getter'; // Ajuste le chemin selon ton projet
+import { GetterOutput } from '../src/Getter';
 
 describe('Basic tests', () => {
     test('should initialize the reactive store correctly', () => {
@@ -26,7 +27,7 @@ describe('Basic tests', () => {
             count: 1,
         };
         type StateType = typeof oState;
-        const r = new ReactiveStore<StateType, { getCount: number }>(oState, {
+        const r = new ReactiveStore(oState, {
             getCount: (state: StateType) => state.count,
         });
         expect(r.getters.getCount).toBe(1);
@@ -144,7 +145,7 @@ describe('State with array of objects', () => {
         type StateType = { entities: number[] };
         const oState: StateType = { entities: [] };
 
-        const myGetters: IGetterDefinition<StateType> = {
+        const myGetters = {
             getSum(state: StateType) {
                 let n = 0;
                 for (const v of state.entities) {
@@ -470,7 +471,7 @@ describe('Array prototype', () => {
                     ],
                 },
                 {
-                    allAdults: (state) => state.entities.every((e) => e.age >= 18),
+                    allAdults: (state: StateType) => state.entities.every((e) => e.age >= 18),
                 }
             );
             expect(store.getters.allAdults).toBe(true);
@@ -481,6 +482,9 @@ describe('Array prototype', () => {
 });
 
 describe('Array getter recompute', () => {
+    type ArrEntityType = { name: string; age: number; role: string[] };
+    type ArrStateType = { entities: ArrEntityType[] };
+
     test('should recompute all entities', () => {
         const store = new ReactiveStore(
             {
@@ -513,7 +517,7 @@ describe('Array getter recompute', () => {
                 ],
             },
             {
-                getAdmins: (state): string[] => {
+                getAdmins: (state: ArrStateType): string[] => {
                     nCalled++;
                     return state.entities
                         .filter((e) => e.role.includes('admin'))
@@ -556,10 +560,13 @@ describe('getter calling other getters', () => {
             entities: EntityType[];
         };
 
-        interface MyGetters extends GetterRegistry {
-            getAdminCount: number;
-            getAdmins: string[];
-        }
+        // For inter-getter calls, define the getter shapes explicitly so TypeScript
+        // can resolve the self-referential GetterOutput<MyGetters> type for the
+        // `getters` parameter inside each function.
+        type MyGetters = {
+            getAdmins: (state: StateType) => string[];
+            getAdminCount: (state: StateType, getters: GetterOutput<MyGetters>) => number;
+        };
 
         let nCalled: number = 0;
         const store = new ReactiveStore<StateType, MyGetters>(
@@ -593,7 +600,7 @@ describe('getter calling other getters', () => {
                 ],
             },
             {
-                getAdminCount: (state, getters: MyGetters) => {
+                getAdminCount: (state, getters) => {
                     ++nCalled;
                     return getters.getAdmins.length;
                 },
@@ -616,10 +623,9 @@ describe('getter calling other getters', () => {
 describe('In-place mutating array methods', () => {
     test('sort: getter should be invalidated even though length does not change', () => {
         type StateType = { values: number[] };
-        const store = new ReactiveStore<StateType, { getSorted: number[] }>(
-            { values: [3, 1, 2] },
-            { getSorted: (state) => [...state.values] }
-        );
+        const store = new ReactiveStore({ values: [3, 1, 2] } as { values: number[] }, {
+            getSorted: (state: StateType) => [...state.values],
+        });
         expect(store.getters.getSorted).toEqual([3, 1, 2]);
         store.state.values.sort((a, b) => a - b);
         expect(store.getters.getSorted).toEqual([1, 2, 3]);
@@ -627,10 +633,9 @@ describe('In-place mutating array methods', () => {
 
     test('reverse: getter should be invalidated even though length does not change', () => {
         type StateType = { values: number[] };
-        const store = new ReactiveStore<StateType, { getValues: number[] }>(
-            { values: [1, 2, 3] },
-            { getValues: (state) => [...state.values] }
-        );
+        const store = new ReactiveStore({ values: [1, 2, 3] } as { values: number[] }, {
+            getValues: (state: StateType) => [...state.values],
+        });
         expect(store.getters.getValues).toEqual([1, 2, 3]);
         store.state.values.reverse();
         expect(store.getters.getValues).toEqual([3, 2, 1]);
@@ -638,10 +643,9 @@ describe('In-place mutating array methods', () => {
 
     test('fill: getter should be invalidated even though length does not change', () => {
         type StateType = { values: number[] };
-        const store = new ReactiveStore<StateType, { getValues: number[] }>(
-            { values: [1, 2, 3] },
-            { getValues: (state) => [...state.values] }
-        );
+        const store = new ReactiveStore({ values: [1, 2, 3] } as { values: number[] }, {
+            getValues: (state: StateType) => [...state.values],
+        });
         expect(store.getters.getValues).toEqual([1, 2, 3]);
         store.state.values.fill(0);
         expect(store.getters.getValues).toEqual([0, 0, 0]);
@@ -651,9 +655,9 @@ describe('In-place mutating array methods', () => {
 describe('New primitive properties on state objects', () => {
     test('getter using Object.keys should be invalidated when a new primitive property is added', () => {
         type StateType = { config: Record<string, number> };
-        const store = new ReactiveStore<StateType, { getKeys: string[] }>(
-            { config: { a: 1 } },
-            { getKeys: (state) => Object.keys(state.config) }
+        const store = new ReactiveStore(
+            { config: { a: 1 } } as { config: Record<string, number> },
+            { getKeys: (state: StateType) => Object.keys(state.config) }
         );
         expect(store.getters.getKeys).toEqual(['a']);
         (store.state.config as Record<string, number>).b = 2;
@@ -664,10 +668,9 @@ describe('New primitive properties on state objects', () => {
 describe('Array element deletion', () => {
     test('getter using spread should be invalidated when an element is deleted', () => {
         type StateType = { values: number[] };
-        const store = new ReactiveStore<StateType, { getValues: number[] }>(
-            { values: [1, 2, 3] },
-            { getValues: (state) => [...state.values] }
-        );
+        const store = new ReactiveStore({ values: [1, 2, 3] } as { values: number[] }, {
+            getValues: (state: StateType) => [...state.values],
+        });
         expect(store.getters.getValues).toEqual([1, 2, 3]);
         delete (store.state.values as number[])[1];
         expect(store.getters.getValues).toEqual([1, undefined, 3]);
@@ -675,12 +678,43 @@ describe('Array element deletion', () => {
 
     test('getter using direct index access should be invalidated when that element is deleted', () => {
         type StateType = { values: number[] };
-        const store = new ReactiveStore<StateType, { getFirst: number | undefined }>(
-            { values: [1, 2, 3] },
-            { getFirst: (state) => state.values[0] }
-        );
+        const store = new ReactiveStore({ values: [1, 2, 3] } as { values: number[] }, {
+            getFirst: (state: StateType) => state.values[0],
+        });
         expect(store.getters.getFirst).toBe(1);
         delete (store.state.values as number[])[0];
         expect(store.getters.getFirst).toBeUndefined();
+    });
+});
+
+describe('Getter dependency test', () => {
+    test('should return 12 when having level 4 and constitution modifier +3', () => {
+        type Abilities = {
+            constitution: number;
+        };
+        type StateType = {
+            abilities: Abilities;
+            level: number;
+        };
+        const state: StateType = {
+            abilities: {
+                constitution: 16,
+            },
+            level: 4,
+        };
+        type GetterType = {
+            getConstitutionModifier: number;
+            getLevel: number;
+            getHitPoints: number;
+        };
+        const getters = {
+            getConstitutionModifier: (state: StateType): number =>
+                Math.floor((state.abilities.constitution - 10) / 2),
+            getLevel: (state: StateType): number => state.level,
+            getHitPoints: (state: StateType, getters: GetterType): number =>
+                getters.getConstitutionModifier * getters.getLevel,
+        };
+        const store = new ReactiveStore(state, getters);
+        expect(store.getters.getHitPoints).toBe(12);
     });
 });
