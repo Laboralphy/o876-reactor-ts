@@ -1,32 +1,30 @@
 import { DependencyRegistry } from './DependencyRegistry';
 
 /**
- * This is the interface of definition of getters
+ * Maps a getter definition object to its output record type.
+ * Each key maps to the return type of the corresponding getter function.
  */
-export interface IGetterDefinition<S extends object> {
-    [name: string]: (state: S, getters: any) => any;
-}
-
-// /**
-//  * A getter collection, collects all Getter instance
-//  * This is useful to quickly recover data about any getter (cached value, dependency registry...)
-//  */
-// export interface GetterCollection<T extends object> {
-//     [key: string]: Getter<T, any>;
-// }
-
-export type GetterCollection<S extends object> = {
-    [K in keyof IGetterDefinition<S>]: Getter<S, ReturnType<IGetterDefinition<S>[K]>>;
+export type GetterOutput<G> = {
+    [K in keyof G]: G[K] extends (...args: never[]) => infer R ? R : never;
 };
 
 /**
- * A getter registry is an object that holds the type of all final getters
- * In this object, getter are no longer function but real getter properties that triggers
- * a run function of one item of the getterCollection
+ * The constraint for a getter definition object.
+ * Each getter is a function (state: S, getters: GetterOutput<G>) => unknown.
+ * G is self-referential: it references itself through GetterOutput<G>.
+ * TypeScript resolves this through constraint inference — each getter's return type
+ * is derived from state alone, so the circular reference is never actually evaluated.
  */
-export interface GetterRegistry {
-    [name: string]: any;
-}
+export type GetterDefs<S extends object, G> = {
+    [K in keyof G]: (state: S, getters: GetterOutput<G>) => unknown;
+};
+
+/**
+ * A collection of Getter instances, one per key in G.
+ */
+export type GetterCollection<S extends object, G> = {
+    [K in keyof G]: Getter<S, GetterOutput<G>[K], GetterOutput<G>>;
+};
 
 /**
  * This class will manage a Getter and all associated data,
@@ -35,49 +33,35 @@ export interface GetterRegistry {
  * - invalid : the invalidity flag
  * - depreg : the dependency registry
  */
-export class Getter<S extends object, R> {
+export class Getter<
+    S extends object,
+    R,
+    GO extends Record<string, unknown> = Record<string, unknown>,
+> {
     // The cached value ; valid until one of the getter dependencies changes
-    private _cache: any = undefined;
-    // Set to true when a dependency is change, and the value needs to be re-evaluated
+    private _cache: R | undefined = undefined;
+    // Set to true when a dependency is changed, and the value needs to be re-evaluated
     // set to false when getter value is re-evaluated
     private _invalid: boolean = true;
-    // The dependency registry store all getter dependencies
+    // The dependency registry stores all getter dependencies
     // a dependency is a tuple (target, property)
     // if a registered (target, property) changes its value, the invalidity flag is set to true
     private readonly _depreg = new DependencyRegistry();
 
-    /**
-     * The constructor accepts a function that is the getter computation code
-     * @param fn
-     */
-    constructor(private readonly fn: (state: S, getters: GetterRegistry) => R) {}
+    constructor(private readonly fn: (state: S, getters: GO) => R) {}
 
-    /**
-     * Returns true is getter value is valid
-     * Returns false is getter value is invalid because some dependencies has changed
-     */
-    get invalid() {
+    get invalid(): boolean {
         return this._invalid;
     }
 
-    /**
-     * Makes the getter invalid, and forces it to discard cached value
-     */
-    invalidate() {
+    invalidate(): void {
         this._invalid = true;
     }
 
-    /**
-     * The dependency registry instance
-     */
-    get depreg() {
+    get depreg(): DependencyRegistry {
         return this._depreg;
     }
 
-    /**
-     * The getter last computed value,
-     * This value is either valid, or invalid; check this.invalid to know.
-     */
     get value(): R {
         if (this._invalid) {
             throw new Error('Getter not computed yet or invalid.');
@@ -85,15 +69,11 @@ export class Getter<S extends object, R> {
         return this._cache as R;
     }
 
-    /**
-     * return the getter value, if valid.
-     * else, recompute getter value before returning it
-     */
-    run(state: S, getters: GetterRegistry): R {
+    run(state: S, getters: GO): R {
         if (this.invalid) {
             this._cache = this.fn(state, getters);
             this._invalid = false;
         }
-        return this._cache;
+        return this._cache as R;
     }
 }
