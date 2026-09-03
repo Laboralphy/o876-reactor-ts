@@ -191,14 +191,21 @@ export class ReactiveStore<S extends object, G extends GetterDefs<S, G>> {
         return result;
     }
 
-    handlerDeleteProperty<X extends object>(target: X, property: string | symbol): never {
-        throw new Error(
-            'Cannot delete key ' +
-                property.toString() +
-                '. Adding or deleting keys is forbidden in state. This is because getters cache is not invalidate by adding/removing properties'
-        );
-        // trigger(target, property)
-        // return Reflect.deleteProperty(target, property)
+    /**
+     * Deleting a key invalidates two things, and both matter: the key itself, for a getter that
+     * reads that one property, and SYMBOL_BASE_OBJECT, for a getter that walks the object
+     * (`Object.keys`/`values`/`entries`, spread) and so has no dependency on any single key.
+     *
+     * Missing the second is what makes a deletion look impossible to support — `handlerOwnKeys`
+     * is what such a getter tracks through, so without it the cached value survives the delete
+     * and nothing explains why. This mirrors `handlerArrayDeleteProperty`, and is the exact
+     * counterpart of the new-property branch in `handlerSet`.
+     */
+    handlerDeleteProperty<X extends object>(target: X, property: string | symbol): boolean {
+        const result = Reflect.deleteProperty(target, property);
+        this.trigger(target, property);
+        this.trigger(target, SYMBOL_BASE_OBJECT);
+        return result;
     }
 
     handlerArrayGet<X extends unknown[]>(

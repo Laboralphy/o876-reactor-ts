@@ -687,6 +687,83 @@ describe('Array element deletion', () => {
     });
 });
 
+describe('Object property deletion', () => {
+    test('getter using Object.values should be invalidated when a property is deleted', () => {
+        type StateType = { data: Record<string, number> };
+        const store = new ReactiveStore({ data: { a: 1, b: 2, c: 3 } } as StateType, {
+            getSum: (state: StateType) =>
+                Object.values(state.data).reduce((acc, curr) => acc + curr, 0),
+        });
+        expect(store.getters.getSum).toBe(6);
+        delete store.state.data.a;
+        expect(store.getters.getSum).toBe(5);
+    });
+
+    test('getter using Object.keys should be invalidated when a property is deleted', () => {
+        type StateType = { config: Record<string, number> };
+        const store = new ReactiveStore({ config: { a: 1, b: 2 } } as StateType, {
+            getKeys: (state: StateType) => Object.keys(state.config),
+        });
+        expect(store.getters.getKeys).toEqual(['a', 'b']);
+        delete store.state.config.a;
+        expect(store.getters.getKeys).toEqual(['b']);
+    });
+
+    test('getter using direct property access should be invalidated when that property is deleted', () => {
+        type StateType = { config: Record<string, number> };
+        const store = new ReactiveStore({ config: { a: 1, b: 2 } } as StateType, {
+            getA: (state: StateType) => state.config.a,
+        });
+        expect(store.getters.getA).toBe(1);
+        delete store.state.config.a;
+        expect(store.getters.getA).toBeUndefined();
+    });
+
+    test('deleting a property actually removes it from state', () => {
+        type StateType = { config: Record<string, number> };
+        const store = new ReactiveStore({ config: { a: 1, b: 2 } } as StateType, {
+            getKeys: (state: StateType) => Object.keys(state.config),
+        });
+        delete store.state.config.a;
+        expect('a' in store.state.config).toBe(false);
+        expect(store.state.config).toEqual({ b: 2 });
+    });
+
+    test('deleting a key that was never there leaves the getter alone', () => {
+        type StateType = { config: Record<string, number> };
+        const store = new ReactiveStore({ config: { a: 1 } } as StateType, {
+            getKeys: (state: StateType) => Object.keys(state.config),
+        });
+        expect(store.getters.getKeys).toEqual(['a']);
+        delete store.state.config.zzz;
+        expect(store.getters.getKeys).toEqual(['a']);
+    });
+
+    test('a property can be added back after being deleted', () => {
+        type StateType = { config: Record<string, number> };
+        const store = new ReactiveStore({ config: { a: 1 } } as StateType, {
+            getSum: (state: StateType) =>
+                Object.values(state.config).reduce((acc, curr) => acc + curr, 0),
+        });
+        expect(store.getters.getSum).toBe(1);
+        delete store.state.config.a;
+        expect(store.getters.getSum).toBe(0);
+        store.state.config.a = 5;
+        expect(store.getters.getSum).toBe(5);
+    });
+
+    test('deleting a nested object property invalidates a getter reading through it', () => {
+        type StateType = { outer: { inner: Record<string, number> } };
+        const store = new ReactiveStore({ outer: { inner: { a: 1, b: 2 } } } as StateType, {
+            getSum: (state: StateType) =>
+                Object.values(state.outer.inner).reduce((acc, curr) => acc + curr, 0),
+        });
+        expect(store.getters.getSum).toBe(3);
+        delete store.state.outer.inner.b;
+        expect(store.getters.getSum).toBe(1);
+    });
+});
+
 describe('Getter dependency test', () => {
     test('should return 12 when having level 4 and constitution modifier +3', () => {
         type Abilities = {
